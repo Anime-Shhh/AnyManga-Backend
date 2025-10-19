@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 
@@ -15,6 +17,12 @@ type chapter struct {
 
 func main() {
 	i := chapter{}
+	reader := bufio.NewReader(os.Stdin)
+	// take usr input for manga name
+	fmt.Println("Enter the name of the manga(check spelling:")
+	mangaName, _ := reader.ReadString('\n')
+	mangaName = strings.ReplaceAll(strings.ToLower(strings.TrimSpace(mangaName)), " ", "-")
+	fmt.Println("name is: ", mangaName)
 
 	// take user input on if they want one or more chapters
 	var more string
@@ -31,36 +39,24 @@ func main() {
 	}
 
 	if more == "y" {
-		// get start chapter
-		for {
-			fmt.Println("Enter start chapter number: ")
-			_, err := fmt.Scanln(&start)
-			if err != nil {
-				fmt.Println("Invalid input. Input a number")
-				// clear input buffer
-				var discard string
-				fmt.Scanln(&discard)
-				continue // loops again instead of going below if condition
-			}
-			if start < 0 {
-				fmt.Println("Invalid input. Input a number")
-				continue
-			}
-			break
-		}
 		// get end chapter
 		for {
-			fmt.Println("Enter end chapter number: ")
-			_, err := fmt.Scanln(&end)
+			fmt.Println("Enter start and end chapter number (space separated): ")
+			_, err := fmt.Scanln(&start, &end)
 			if err != nil {
-				fmt.Println("Invalid input. Input a number")
+				fmt.Println("Invalid input. Input 2 positive numbers, space separated")
 				// clear input buffer
-				var discard string
-				fmt.Scanln(&discard)
+				for {
+					var discard string
+					_, err := fmt.Scanln(&discard)
+					if err != nil {
+						break // stop once buffer is empty
+					}
+				}
 				continue // loops again instead of going below if condition
 			}
-			if end < 0 {
-				fmt.Println("Invalid input. Input a number")
+			if end < 0 || start < 0 {
+				fmt.Println("no negative numbers")
 				continue
 			}
 			break
@@ -117,5 +113,6 @@ func main() {
 		fmt.Println(mangaAndChapter)
 	})
 
-	c.Visit("https://www.mangaread.org/manga/one-piece/chapter-1152/")
+	startSite := fmt.Sprintf("https://www.mangaread.org/manga/%s/chapter-%d/", mangaName, start)
+	c.Visit(startSite)
 }
