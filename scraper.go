@@ -6,6 +6,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/gocolly/colly"
 )
@@ -15,8 +16,57 @@ type chapter struct {
 	Pages   []string `json:"pages"`
 }
 
+func scrapeChapter(url string) (chapter, error) {
+	var result chapter
+
+	// will only go to websites that are w these domains, so no wrong scraping on rediredted sites
+	c := colly.NewCollector(
+		colly.AllowedDomains("mangaread.org", "www.mangaread.org"),
+		colly.Async(true),
+	)
+
+	// Set error handler
+	c.OnError(func(r *colly.Response, err error) {
+		fmt.Println("Request URL:", r.Request.URL, "failed with response:", r, "\nError:", err)
+	})
+
+	// on every occurence of the img element do the following
+	c.OnHTML("img", func(e *colly.HTMLElement) {
+		link := strings.TrimSpace(e.Attr("src"))
+
+		re, err := regexp.Compile(`(?i)wp-content/uploads/WP-manga/data/manga_[^/]+/[^/]+/\d+\.(jpg|jpeg|png|webp)$`)
+		if err != nil {
+			fmt.Println("error compiling regex:", err)
+		}
+		if re.MatchString(link) {
+			result.Pages = append(result.Pages, link)
+			// print the link
+			fmt.Println("Valid: ", link)
+		}
+	})
+
+	// runs every time before a site is visited
+	c.OnRequest(func(r *colly.Request) {
+		fmt.Println("visiting:", r.URL.String())
+		site := strings.Split(r.URL.String(), "/")
+		mangaAndChapter := site[len(site)-3] + "_" + site[len(site)-2]
+		result.Chapter = mangaAndChapter
+
+		fmt.Println(site)
+		fmt.Println(mangaAndChapter)
+	})
+
+	// actually visit the site
+	err := c.Visit(url)
+	if err != nil {
+		return result, err
+	}
+	c.Wait() // wait for this one to be done, async
+
+	return result, nil
+}
+
 func main() {
-	i := chapter{}
 	reader := bufio.NewReader(os.Stdin)
 	// take usr input for manga name
 	fmt.Println("Enter the name of the manga(check spelling:")
@@ -82,37 +132,40 @@ func main() {
 		fmt.Println("Your chapter is:", start, end)
 	}
 
-	// will only go to websites that are w these domains, so no wrong scraping on rediredted sites
-	c := colly.NewCollector(
-		colly.AllowedDomains("mangaread.org", "www.mangaread.org"),
-	)
+	lenChaps := end - start + 1
+	results := make([]chapter, lenChaps)
+	errs := make([]error, lenChaps)
 
-	// on every occurence of the img element do the following
-	c.OnHTML("img", func(e *colly.HTMLElement) {
-		link := strings.TrimSpace(e.Attr("src"))
+	var wg sync.WaitGroup
 
-		re, err := regexp.Compile(`(?i)wp-content/uploads/WP-manga/data/manga_[^/]+/[^/]+/\d+\.(jpg|jpeg|png|webp)$`)
-		if err != nil {
-			fmt.Println("error compiling regex:", err)
+	for ch := start; ch <= end; ch++ {
+		wg.Add(1)
+		// get index where to store the chapter data
+		idx := ch - start
+		url := fmt.Sprintf("https://www.mangaread.org/manga/%s/chapter-%d/", mangaName, ch)
+
+		go func(index int, visitUrl string) {
+			defer wg.Done()
+
+			chap, err := scrapeChapter(visitUrl)
+			if err != nil {
+				errs[index] = err
+				return
+			}
+			results[index] = chap
+		}(idx, url)
+	}
+
+	wg.Wait()
+
+	// handle errors
+	for i, e := range errs {
+		if e != nil {
+			fmt.Printf("chapter %d failed: %v\n", start+i, e)
 		}
-		if re.MatchString(link) {
-			i.Pages = append(i.Pages, link)
-			// print the link
-			fmt.Println("Valid: ", link)
-		}
-	})
+	}
 
-	// runs every time a site is visited
-	c.OnRequest(func(r *colly.Request) {
-		fmt.Println("visiting:", r.URL.String())
-		site := strings.Split(r.URL.String(), "/")
-		mangaAndChapter := site[len(site)-3] + "_" + site[len(site)-2]
-		i.Chapter = mangaAndChapter
-
-		fmt.Println(site)
-		fmt.Println(mangaAndChapter)
-	})
-
-	startSite := fmt.Sprintf("https://www.mangaread.org/manga/%s/chapter-%d/", mangaName, start)
-	c.Visit(startSite)
+	for _, chap := range results {
+		fmt.Println("Chapter: ", chap.Chapter, "\t pages:", len(chap.Pages))
+	}
 }
