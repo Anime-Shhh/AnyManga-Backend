@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"fmt"
 	"os"
-	"regexp"
 	"strings"
 	"sync"
 
@@ -31,18 +30,10 @@ func scrapeChapter(url string) (chapter, error) {
 	})
 
 	// on every occurence of the img element do the following
-	c.OnHTML("img", func(e *colly.HTMLElement) {
-		link := strings.TrimSpace(e.Attr("src"))
-
-		re, err := regexp.Compile(`(?i)wp-content/uploads/WP-manga/data/manga_[^/]+/[^/]+/\d+\.(jpg|jpeg|png|webp)$`)
-		if err != nil {
-			fmt.Println("error compiling regex:", err)
-		}
-		if re.MatchString(link) {
-			result.Pages = append(result.Pages, link)
-			// print the link
-			fmt.Println("Valid: ", link)
-		}
+	c.OnHTML("img.wp-manga-chapter-img", func(e *colly.HTMLElement) {
+		link := e.Attr("src")
+		result.Pages = append(result.Pages, link)
+		fmt.Println("Found:", link)
 	})
 
 	// runs every time before a site is visited
@@ -143,6 +134,7 @@ func main() {
 		// get index where to store the chapter data
 		idx := ch - start
 		url := fmt.Sprintf("https://www.mangaread.org/manga/%s/chapter-%d/", mangaName, ch)
+		fmt.Println("This is the site:", url)
 
 		go func(index int, visitUrl string) {
 			defer wg.Done()
