@@ -15,6 +15,19 @@ func Reverse[T any](s []T) {
 	}
 }
 
+func getCoverImage(url string) string {
+	col := colly.NewCollector(colly.AllowedDomains("mangaread.org", "www.mangaread.org"))
+
+	var bookCover string
+	col.OnHTML("div.summary_image a", func(e *colly.HTMLElement) {
+		bookCover = e.ChildAttr("img", "src")
+	})
+
+	col.Visit(url)
+	col.Wait()
+	return bookCover
+}
+
 func GetMangaInfo(c *gin.Context) {
 	var bookCover string
 	var chapters []string

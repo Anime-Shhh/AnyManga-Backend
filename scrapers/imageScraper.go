@@ -18,6 +18,20 @@ type ChaptersRequest struct {
 	Chapters []string `json:"chapters"`
 }
 
+func CleanURL(raw string) string {
+	// Replace encoded entities like &#039; with their numeric part preserved (→ 039)
+	clean := raw
+	clean = strings.ReplaceAll(clean, "#", "")
+	clean = strings.ReplaceAll(clean, "&", "")
+	// Remove unwanted punctuation
+	clean = strings.ReplaceAll(clean, ",", "")
+	clean = strings.ReplaceAll(clean, "'", "")
+	clean = strings.ReplaceAll(clean, `"`, "")
+	clean = strings.ReplaceAll(clean, " ", "-")
+
+	return clean
+}
+
 func GetAllChapters(c *gin.Context) {
 	var req ChaptersRequest
 
@@ -47,6 +61,7 @@ func GetAllChapters(c *gin.Context) {
 		ch = re.ReplaceAllString(ch, "-")
 		// get index where to store the chapter data
 		url := fmt.Sprintf("https://www.mangaread.org/manga/%s/%s/", title, ch)
+		url = CleanURL(url)
 		fmt.Println("This is the site:", url)
 
 		go func(visitUrl string) {
