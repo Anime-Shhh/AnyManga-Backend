@@ -28,10 +28,23 @@ func getCoverImage(url string) string {
 	return bookCover
 }
 
+func getChapters(url string) []string {
+	var chapters []string
+	col := colly.NewCollector(colly.AllowedDomains("mangaread.org", "www.mangaread.org"))
+	col.OnHTML("li.wp-manga-chapter a", func(e *colly.HTMLElement) {
+		chapter := e.Text
+		if chapter != "" {
+			chapters = append(chapters, chapter)
+		}
+	})
+	col.Visit(url)
+	col.Wait()
+	return chapters
+}
+
 func GetMangaInfo(c *gin.Context) {
 	var bookCover string
 	var chapters []string
-	col := colly.NewCollector(colly.AllowedDomains("mangaread.org", "www.mangaread.org"))
 
 	title := c.Query("title")
 	title = strings.ReplaceAll(strings.ToLower(strings.TrimSpace(title)), " ", "-")
@@ -43,18 +56,8 @@ func GetMangaInfo(c *gin.Context) {
 
 	chapURL := fmt.Sprintf("https://www.mangaread.org/manga/%s/", title)
 
-	col.OnHTML("div.summary_image a", func(e *colly.HTMLElement) {
-		bookCover = e.ChildAttr("img", "src")
-	})
-
-	col.OnHTML("li.wp-manga-chapter a", func(e *colly.HTMLElement) {
-		chapter := e.Text
-		if chapter != "" {
-			chapters = append(chapters, chapter)
-		}
-	})
-
-	col.Visit(chapURL)
+	bookCover = getCoverImage(chapURL)
+	chapters = getChapters(chapURL)
 
 	if bookCover == "" && len(chapters) == 0 {
 		c.JSON(http.StatusNotFound, gin.H{"error": "No manga info found"})

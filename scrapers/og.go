@@ -134,6 +134,7 @@ func main() {
 		// get index where to store the chapter data
 		idx := ch - start
 		url := fmt.Sprintf("https://www.mangaread.org/manga/%s/chapter-%d/", mangaName, ch)
+
 		fmt.Println("This is the site:", url)
 
 		go func(index int, visitUrl string) {
