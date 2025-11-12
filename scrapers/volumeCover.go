@@ -32,7 +32,8 @@ func getChapters(url string) []string {
 	var chapters []string
 	col := colly.NewCollector(colly.AllowedDomains("mangaread.org", "www.mangaread.org"))
 	col.OnHTML("li.wp-manga-chapter a", func(e *colly.HTMLElement) {
-		chapter := e.Text
+		chapter := strings.TrimSpace(e.Text)
+		chapter = strings.Join(strings.Fields(chapter), " ") // collapse any tabs/newlines/spaces into single spaces
 		if chapter != "" {
 			chapters = append(chapters, chapter)
 		}

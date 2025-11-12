@@ -20,6 +20,7 @@ func main() {
 	r.GET("/featured", scrapers.GetFeaturedManga)
 	r.GET("/popular", scrapers.GetPopular)
 	r.GET("/mangapage", scrapers.GetMangaPageInfo)
+	r.POST("/chapterimages", scrapers.GetChapterPages)
 
 	// Start the server on port 8080
 	r.Run("localhost:8080")
