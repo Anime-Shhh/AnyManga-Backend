@@ -3,7 +3,6 @@ package scrapers
 import (
 	"fmt"
 	"net/http"
-	"regexp"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -15,7 +14,6 @@ type ChapterRequest struct {
 	Chapter string `json:"chapter"`
 }
 
-// Full handler with debug logs
 func GetChapterPages(c *gin.Context) {
 	var req ChapterRequest
 
@@ -27,21 +25,18 @@ func GetChapterPages(c *gin.Context) {
 	}
 	fmt.Println("Received request:", req)
 
-	// Clean and normalize manga title and chapter
+	// Clean manga title and chapter
 	title := strings.ToLower(strings.TrimSpace(req.Title))
 	ch := strings.ToLower(strings.TrimSpace(req.Chapter))
-	re := regexp.MustCompile(`[\s-]+`)
-	title = re.ReplaceAllString(title, "-")
-	ch = re.ReplaceAllString(ch, "-")
 
-	fmt.Println("Cleaned title:", title, "Cleaned chapter:", ch)
+	fmt.Println("Original title:", title, "Original chapter:", ch)
 
-	// Construct URL for scraping
+	// Construct URL
 	chapURL := fmt.Sprintf("https://www.mangaread.org/manga/%s/%s/", title, ch)
-	chapURL = CleanURL(chapURL) // assuming CleanURL exists
+	chapURL = CleanURL(chapURL)
 	fmt.Println("Constructed chapter URL:", chapURL)
 
-	// Scrape the chapter
+	// Scrape chapter
 	chap, err := scrapeChapter(chapURL)
 	if err != nil {
 		fmt.Println("scrapeChapter error:", err)
@@ -49,17 +44,10 @@ func GetChapterPages(c *gin.Context) {
 		return
 	}
 
-	// Check if pages exist
-	if len(chap.Pages) == 0 {
-		fmt.Println("No pages found for chapter")
-		c.JSON(http.StatusNotFound, gin.H{"error": "chapter has no pages"})
-		return
-	}
-
 	// Debug: log pages found
 	fmt.Println("Found pages:", chap.Pages)
 
-	// Send JSON response
+	// Return JSON
 	c.JSON(http.StatusOK, gin.H{
 		"images": chap.Pages,
 	})

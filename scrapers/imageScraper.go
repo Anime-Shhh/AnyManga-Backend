@@ -19,15 +19,25 @@ type ChaptersRequest struct {
 }
 
 func CleanURL(raw string) string {
-	// Replace encoded entities like &#039; with their numeric part preserved (→ 039)
 	clean := raw
-	clean = strings.ReplaceAll(clean, "#", "")
+
+	// Remove HTML entity symbols
 	clean = strings.ReplaceAll(clean, "&", "")
+	clean = strings.ReplaceAll(clean, "#", "")
+	clean = strings.ReplaceAll(clean, ";", "")
+
 	// Remove unwanted punctuation
 	clean = strings.ReplaceAll(clean, ",", "")
 	clean = strings.ReplaceAll(clean, "'", "")
 	clean = strings.ReplaceAll(clean, `"`, "")
 	clean = strings.ReplaceAll(clean, " ", "-")
+
+	// Replace multiple consecutive dashes with single dash
+	re := regexp.MustCompile(`-+`)
+	clean = re.ReplaceAllString(clean, "-")
+
+	// Lowercase
+	clean = strings.ToLower(clean)
 
 	return clean
 }
