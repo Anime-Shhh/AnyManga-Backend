@@ -9,3 +9,5 @@ run:
 ```
 go run main.go
 ```
+
+visit <https://anymanga.vercel.app/>
