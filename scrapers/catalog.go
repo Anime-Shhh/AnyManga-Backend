@@ -62,7 +62,7 @@ var (
 	indexCache  = newCache[*mangaIndex](256, 5*time.Minute)
 	pageCache   = newCache[[]string](512, 5*time.Minute)
 	searchCache = newCache[searchResults](256, 2*time.Minute)
-	browseCache = newCache[[]catalogItem](2, 5*time.Minute)
+	browseCache = newCache[[]catalogItem](4, 5*time.Minute)
 )
 
 func loadDocument(address string) (*goquery.Document, *url.URL, error) {
