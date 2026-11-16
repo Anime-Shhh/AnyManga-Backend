@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"fmt"
 	"image"
+	_ "image/jpeg"
+	_ "image/png"
+	"io"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
-	"sync"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jung-kurt/gofpdf"
@@ -50,85 +53,44 @@ func GetAllChapters(c *gin.Context) {
 		return
 	}
 
-	if req.Title == "" || len(req.Chapters) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing title or chapters"})
+	if req.Title == "" || len(req.Chapters) == 0 || len(req.Chapters) > 10 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Select between one and ten chapters."})
 		return
 	}
-
-	title := req.Title
-	title = strings.ReplaceAll(strings.ToLower(strings.TrimSpace(title)), " ", "-")
-
-	chapters := req.Chapters
-	results := make([]chapter, len(chapters))
-
-	var wg sync.WaitGroup
-
-	for i, ch := range chapters {
-		wg.Add(1)
-
-		re := regexp.MustCompile(`[\s-]+`)
-		ch = strings.ToLower(strings.TrimSpace(ch))
-		ch = re.ReplaceAllString(ch, "-")
-		// get index where to store the chapter data
-		url := fmt.Sprintf("https://www.mangaread.org/manga/%s/%s/", title, ch)
-		url = CleanURL(url)
-		fmt.Println("This is the site:", url)
-
-		go func(visitUrl string) {
-			defer wg.Done()
-
-			chap, _ := scrapeChapter(visitUrl)
-			results[i] = chap
-		}(url)
+	index := indexForRequest(c, req.Title)
+	if index == nil {
+		return
+	}
+	results := make([][]string, 0, len(req.Chapters))
+	for _, requested := range req.Chapters {
+		position, ok := index.lookup(requested)
+		if !ok {
+			c.JSON(http.StatusNotFound, gin.H{"error": "A selected chapter was not found."})
+			return
+		}
+		pages, err := loadPages(index.Entries[position])
+		if err != nil {
+			reportError(c, err, "Could not load a selected chapter.")
+			return
+		}
+		results = append(results, pages)
 	}
 
-	wg.Wait()
-
 	pdf := gofpdf.New("P", "mm", "A4", "")
-	for _, chap := range results {
-		for _, imgURL := range chap.Pages {
-			imgURL = strings.TrimSpace(imgURL)
-			resp, err := http.Get(imgURL)
+	for _, pages := range results {
+		for _, imgURL := range pages {
+			if c.Request.Context().Err() != nil {
+				return
+			}
+			err := addPDFPage(c.Request, pdf, imgURL)
 			if err != nil {
-				fmt.Println("Error downloading image:", err)
-				continue
+				reportError(c, err, "Could not download a chapter image.")
+				return
 			}
-			defer resp.Body.Close()
-
-			buf := new(bytes.Buffer)
-			_, err = buf.ReadFrom(resp.Body)
-			if err != nil {
-				fmt.Println("Error reading image:", err)
-				continue
-			}
-
-			// Detect image type
-			img, imgType, err := image.Decode(bytes.NewReader(buf.Bytes()))
-			if err != nil {
-				fmt.Println("Decode error:", err)
-				continue
-			}
-
-			// Convert image type to gofpdf string
-			var pdfImgType string
-			switch imgType {
-			case "jpeg":
-				pdfImgType = "JPG"
-			case "png":
-				pdfImgType = "PNG"
-			default:
-				fmt.Println("Unsupported image type:", imgType)
-				continue
-			}
-
-			bounds := img.Bounds()
-			width := float64(bounds.Dx()) * 0.264583
-			height := float64(bounds.Dy()) * 0.264583
-
-			pdf.AddPage()
-			opt := gofpdf.ImageOptions{ImageType: pdfImgType, ReadDpi: true}
-			pdf.RegisterImageOptionsReader(imgURL, opt, bytes.NewReader(buf.Bytes()))
-			pdf.ImageOptions(imgURL, 0, 0, width, height, false, opt, 0, "")
+		}
+		if pdf.PageNo() == 0 {
+			c.JSON(http.StatusBadGateway, gin.H{"error": "No downloadable chapter pages."})
+			return
 		}
 	}
 
@@ -142,6 +104,59 @@ func GetAllChapters(c *gin.Context) {
 
 	// Send PDF to frontend
 	c.Header("Content-Type", "application/pdf")
-	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s.pdf", req.Title))
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s.pdf", index.Slug))
 	c.Data(http.StatusOK, "application/pdf", buf.Bytes())
+}
+
+func addPDFPage(request *http.Request, pdf *gofpdf.Fpdf, address string) error {
+	link, err := url.Parse(address)
+	if err != nil || link.Scheme != "https" ||
+		(link.Host != "www.mangaread.org" && link.Host != "mangaread.org") ||
+		!strings.HasPrefix(link.Path, "/wp-content/uploads/") {
+		return fmt.Errorf("unrecognized MangaRead download image")
+	}
+	select {
+	case upstreamSlots <- struct{}{}:
+		defer func() { <-upstreamSlots }()
+	default:
+		return fmt.Errorf("MangaRead request capacity reached")
+	}
+	req, err := http.NewRequestWithContext(request.Context(), http.MethodGet, address, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := upstream.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("download image returned HTTP %d", resp.StatusCode)
+	}
+	const maxImageBytes = 12 << 20
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxImageBytes+1))
+	if err != nil || len(data) > maxImageBytes {
+		return fmt.Errorf("could not read the download image within the size limit")
+	}
+	config, format, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil || config.Width > 10000 || config.Height > 20000 ||
+		int64(config.Width)*int64(config.Height) > 40_000_000 {
+		return fmt.Errorf("unsupported download image")
+	}
+	var imageType string
+	switch format {
+	case "jpeg":
+		imageType = "JPG"
+	case "png":
+		imageType = "PNG"
+	default:
+		return fmt.Errorf("unsupported PDF image type %q", format)
+	}
+	width, height := float64(config.Width), float64(config.Height)
+	scale := min(210/width, 297/height)
+	pdf.AddPage()
+	options := gofpdf.ImageOptions{ImageType: imageType, ReadDpi: true}
+	pdf.RegisterImageOptionsReader(address, options, bytes.NewReader(data))
+	pdf.ImageOptions(address, (210-width*scale)/2, 0, width*scale, height*scale, false, options, 0, "")
+	return pdf.Error()
 }
