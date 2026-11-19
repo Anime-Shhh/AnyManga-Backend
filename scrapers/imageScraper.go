@@ -6,7 +6,6 @@ import (
 	"image"
 	_ "image/jpeg"
 	_ "image/png"
-	"io"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -45,7 +44,17 @@ func CleanURL(raw string) string {
 	return clean
 }
 
+var pdfSlots = make(chan struct{}, 2)
+
 func GetAllChapters(c *gin.Context) {
+	select {
+	case pdfSlots <- struct{}{}:
+		defer func() { <-pdfSlots }()
+	default:
+		c.Header("Retry-After", "5")
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Downloads are busy. Please try again shortly."})
+		return
+	}
 	var req ChaptersRequest
 
 	if err := c.BindJSON(&req); err != nil {
@@ -62,27 +71,39 @@ func GetAllChapters(c *gin.Context) {
 		return
 	}
 	results := make([][]string, 0, len(req.Chapters))
+	totalPages := 0
 	for _, requested := range req.Chapters {
 		position, ok := index.lookup(requested)
 		if !ok {
 			c.JSON(http.StatusNotFound, gin.H{"error": "A selected chapter was not found."})
 			return
 		}
-		pages, err := loadPages(index.Entries[position])
+		content, err := loadContent(index, index.Entries[position], "")
+		pages := content.Images
+		if content.ExternalURL != "" {
+			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "This chapter is hosted on the publisher’s website and cannot be downloaded here."})
+			return
+		}
 		if err != nil {
 			reportError(c, err, "Could not load a selected chapter.")
+			return
+		}
+		totalPages += len(pages)
+		if totalPages > 200 {
+			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "Select fewer chapters; each PDF is limited to 200 pages."})
 			return
 		}
 		results = append(results, pages)
 	}
 
+	budget := 64 << 20
 	pdf := gofpdf.New("P", "mm", "A4", "")
 	for _, pages := range results {
 		for _, imgURL := range pages {
 			if c.Request.Context().Err() != nil {
 				return
 			}
-			err := addPDFPage(c.Request, pdf, imgURL)
+			err := addPDFPage(c.Request, pdf, imgURL, &budget)
 			if err != nil {
 				reportError(c, err, "Could not download a chapter image.")
 				return
@@ -108,36 +129,22 @@ func GetAllChapters(c *gin.Context) {
 	c.Data(http.StatusOK, "application/pdf", buf.Bytes())
 }
 
-func addPDFPage(request *http.Request, pdf *gofpdf.Fpdf, address string) error {
-	link, err := url.Parse(address)
-	if err != nil || link.Scheme != "https" ||
-		(link.Host != "www.mangaread.org" && link.Host != "mangaread.org") ||
-		!strings.HasPrefix(link.Path, "/wp-content/uploads/") {
-		return fmt.Errorf("unrecognized MangaRead download image")
+func addPDFPage(request *http.Request, pdf *gofpdf.Fpdf, address string, budget *int) error {
+	if strings.HasPrefix(address, "/api/manga/image?") {
+		link, err := url.Parse(address)
+		if err != nil {
+			return err
+		}
+		address = link.Query().Get("url")
 	}
-	select {
-	case upstreamSlots <- struct{}{}:
-		defer func() { <-upstreamSlots }()
-	default:
-		return fmt.Errorf("MangaRead request capacity reached")
-	}
-	req, err := http.NewRequestWithContext(request.Context(), http.MethodGet, address, nil)
+	data, _, err := fetchImage(request.Context(), address)
 	if err != nil {
 		return err
 	}
-	resp, err := upstream.Do(req)
-	if err != nil {
-		return err
+	if len(data) > *budget {
+		return fmt.Errorf("download exceeds the 64 MiB image budget; select fewer chapters")
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("download image returned HTTP %d", resp.StatusCode)
-	}
-	const maxImageBytes = 12 << 20
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxImageBytes+1))
-	if err != nil || len(data) > maxImageBytes {
-		return fmt.Errorf("could not read the download image within the size limit")
-	}
+	*budget -= len(data)
 	config, format, err := image.DecodeConfig(bytes.NewReader(data))
 	if err != nil || config.Width > 10000 || config.Height > 20000 ||
 		int64(config.Width)*int64(config.Height) > 40_000_000 {

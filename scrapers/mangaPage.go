@@ -23,14 +23,29 @@ func validSlug(title string) (string, bool) {
 }
 
 func indexForRequest(c *gin.Context, title string) *mangaIndex {
-	slug, valid := validSlug(title)
-	if !valid {
+	if _, _, err := parseSeriesRef(title); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid manga identifier."})
 		return nil
 	}
-	index, err := getIndex(slug)
+	language := c.DefaultQuery("language", "en")
+	if !validLanguage(language) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid language."})
+		return nil
+	}
+	var index *mangaIndex
+	var err error
+	if c.Query("source") == "mangaread" {
+		slug, ok := validSlug(title)
+		if !ok {
+			c.Status(400)
+			return nil
+		}
+		index, err = getIndex(slug)
+	} else {
+		index, err = getUnifiedIndex(title, language)
+	}
 	if err != nil {
-		reportError(c, err, "Could not load this manga from MangaRead.")
+		reportError(c, err, "Could not load this manga from the available sources.")
 		return nil
 	}
 	return index

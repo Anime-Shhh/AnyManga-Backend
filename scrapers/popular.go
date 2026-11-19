@@ -20,6 +20,9 @@ func GetPopular(c *gin.Context) {
 		return results, nil
 	})
 	if err != nil {
+		items, err = fallbackCatalog("popular")
+	}
+	if err != nil {
 		reportError(c, err, "Could not load popular manga.")
 		return
 	}

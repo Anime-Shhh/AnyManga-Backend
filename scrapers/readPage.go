@@ -24,6 +24,20 @@ func GetChapterPages(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid chapter identifier."})
 		return
 	}
+	skip := c.Query("skip")
+	if skip != "" {
+		providers := strings.Split(skip, ",")
+		if len(providers) > 4 {
+			c.Status(http.StatusBadRequest)
+			return
+		}
+		for _, p := range providers {
+			if providerLabels[p] == "" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "Unknown source."})
+				return
+			}
+		}
+	}
 	index := indexForRequest(c, req.Title)
 	if index == nil {
 		return
@@ -34,9 +48,9 @@ func GetChapterPages(c *gin.Context) {
 		return
 	}
 	current := index.Entries[position]
-	images, err := loadPages(current)
+	content, err := loadContent(index, current, skip)
 	if err != nil {
-		reportError(c, err, "Could not load the chapter pages from MangaRead.")
+		reportError(c, err, "Could not load the chapter pages from the available sources.")
 		return
 	}
 	var previous, next *chapterLink
@@ -46,8 +60,9 @@ func GetChapterPages(c *gin.Context) {
 	if position+1 < len(index.Entries) {
 		next = &index.Entries[position+1]
 	}
+	prefetchNext(index, position)
 	c.JSON(http.StatusOK, gin.H{
-		"images": images, "manga": index.Name, "slug": index.Slug,
+		"images": content.Images, "provider": content.Provider, "externalUrl": content.ExternalURL, "groups": content.Groups, "language": index.Language, "manga": index.Name, "slug": index.Slug,
 		"chapter": current, "previous": previous, "next": next,
 	})
 }

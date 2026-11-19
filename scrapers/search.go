@@ -94,9 +94,9 @@ func Search(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Enter a search of up to 400 bytes and a page between 1 and 100."})
 		return
 	}
-	result, err := cachedSearch(query, page)
+	result, err := multiSearch(query, page)
 	if err != nil {
-		reportError(c, err, "Could not load results from MangaRead.")
+		reportError(c, err, "Could not load search results from the available sources.")
 		return
 	}
 	c.JSON(http.StatusOK, result)

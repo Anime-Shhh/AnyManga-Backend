@@ -13,6 +13,18 @@ import (
 
 func main() {
 	r := gin.Default()
+	_ = r.SetTrustedProxies(nil)
+	capacity := make(chan struct{}, 48)
+	r.Use(func(c *gin.Context) {
+		select {
+		case capacity <- struct{}{}:
+			defer func() { <-capacity }()
+			c.Next()
+		default:
+			c.Header("Retry-After", "2")
+			c.AbortWithStatus(http.StatusServiceUnavailable)
+		}
+	})
 	if origin := os.Getenv("FRONTEND_ORIGIN"); origin != "" {
 		config := cors.DefaultConfig()
 		config.AllowOrigins = []string{origin}
@@ -31,6 +43,9 @@ func main() {
 	if port := os.Getenv("PORT"); port != "" {
 		address = ":" + port
 	}
+	if bind := os.Getenv("BIND_ADDR"); bind != "" {
+		address = bind
+	}
 	server := &http.Server{
 		Addr: address, Handler: r, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second,
 		IdleTimeout: 60 * time.Second, WriteTimeout: 65 * time.Second,
@@ -40,6 +55,7 @@ func main() {
 
 func registerRoutes(routes gin.IRouter) {
 	routes.GET("/health", func(c *gin.Context) { c.Status(http.StatusNoContent) })
+	routes.GET("/image", scrapers.GetProviderImage)
 	routes.GET("/info", scrapers.GetMangaInfo)
 	routes.POST("/chapters", scrapers.GetAllChapters)
 	routes.GET("/featured", scrapers.GetFeaturedManga)

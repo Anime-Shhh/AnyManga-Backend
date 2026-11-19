@@ -72,23 +72,23 @@ func TestChapterReaderUsesSeriesLinksAndCachesPages(t *testing.T) {
 		return data
 	}
 
-	first := getChapter("GET", "/chapterimages?manga=reader-test&chapter=chapter-1", "")
+	first := getChapter("GET", "/chapterimages?source=mangaread&manga=reader-test&chapter=chapter-1", "")
 	if first.Chapter.ID != named || first.Chapter.Title != "Chapter 1 [The Beginning]" || first.Previous != nil ||
 		first.Next == nil || first.Next.ID != "chapter-2" || len(first.Images) != 2 ||
 		first.Images[0] != "https://www.mangaread.org/pages/1.jpg" {
 		t.Fatalf("unexpected first chapter response: %+v", first)
 	}
 
-	next := getChapter("GET", "/chapterimages?manga=reader-test&chapter=chapter-2", "")
+	next := getChapter("GET", "/chapterimages?source=mangaread&manga=reader-test&chapter=chapter-2", "")
 	if next.Previous == nil || next.Previous.ID != named || next.Next == nil || next.Next.ID != "chapter-2-5" {
 		t.Fatalf("unexpected neighbors for chapter 2: %+v", next)
 	}
-	last := getChapter("GET", "/chapterimages?manga=reader-test&chapter=special", "")
+	last := getChapter("GET", "/chapterimages?source=mangaread&manga=reader-test&chapter=special", "")
 	if last.Next != nil || last.Previous == nil || last.Previous.ID != "chapter-2-5" {
 		t.Fatalf("unexpected neighbors for special chapter: %+v", last)
 	}
 
-	legacy := getChapter("POST", "/chapterimages", `{"manga":"reader-test","chapter":"chapter-1-[the-beginning]"}`)
+	legacy := getChapter("POST", "/chapterimages?source=mangaread", `{"manga":"reader-test","chapter":"chapter-1-[the-beginning]"}`)
 	if legacy.Chapter.ID != first.Chapter.ID || requests[series] != 1 || requests[series+named+"/"] != 1 {
 		t.Fatalf("legacy request missed the cached chapter: %+v, upstream requests %v", legacy, requests)
 	}

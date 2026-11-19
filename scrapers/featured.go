@@ -34,6 +34,9 @@ func writeCatalog(c *gin.Context, key, path, message string) {
 		return results, nil
 	})
 	if err != nil {
+		items, err = fallbackCatalog(key)
+	}
+	if err != nil {
 		reportError(c, err, message)
 		return
 	}

@@ -39,15 +39,24 @@ type chapterLink struct {
 }
 
 type mangaIndex struct {
-	Name        string        `json:"name"`
-	Image       string        `json:"image"`
-	Description string        `json:"description"`
-	Slug        string        `json:"slug"`
-	Entries     []chapterLink `json:"chapterEntries"`
-	Chapters    []string      `json:"chapters"`
-	positions   map[string]int
-	aliases     map[string]int
-	numbers     map[string]int
+	Name           string        `json:"name"`
+	Image          string        `json:"image"`
+	Description    string        `json:"description"`
+	Slug           string        `json:"slug"`
+	Entries        []chapterLink `json:"chapterEntries"`
+	Chapters       []string      `json:"chapters"`
+	Kind           string        `json:"kind,omitempty"`
+	AltTitles      []string      `json:"-"`
+	Authors        []string      `json:"authors,omitempty"`
+	Genres         []string      `json:"genres,omitempty"`
+	Languages      []string      `json:"languages,omitempty"`
+	Language       string        `json:"language,omitempty"`
+	Sources        []sourceInfo  `json:"sources,omitempty"`
+	MetadataSource string        `json:"metadataSource,omitempty"`
+	candidates     map[string][]sourceChapter
+	positions      map[string]int
+	aliases        map[string]int
+	numbers        map[string]int
 }
 
 type catalogItem struct {
@@ -138,6 +147,16 @@ func parseIndex(doc *goquery.Document, base *url.URL, slug string) *mangaIndex {
 	if index.Name == "" {
 		index.Name = cleanText(doc.Find("h1").First().Text())
 	}
+	doc.Find(".post-content_item").Each(func(_ int, row *goquery.Selection) {
+		heading := cleanText(row.Find(".summary-heading").Text())
+		value := cleanText(row.Find(".summary-content").Text())
+		if heading == "Type" {
+			index.Kind = strings.ToLower(value)
+		}
+		if heading == "Alternative" {
+			index.AltTitles = strings.FieldsFunc(value, func(r rune) bool { return r == ';' || r == ',' || r == '；' })
+		}
+	})
 	seen := map[string]bool{}
 	doc.Find("li.wp-manga-chapter > a").Each(func(_ int, anchor *goquery.Selection) {
 		link, parts := sourcePath(base, anchor.AttrOr("href", ""))
