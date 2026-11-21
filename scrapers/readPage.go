@@ -48,6 +48,9 @@ func GetChapterPages(c *gin.Context) {
 		return
 	}
 	current := index.Entries[position]
+	if c.Query("refresh") == "1" {
+		refreshContent(index, current, skip)
+	}
 	content, err := loadContent(index, current, skip)
 	if err != nil {
 		reportError(c, err, "Could not load the chapter pages from the available sources.")
@@ -62,7 +65,7 @@ func GetChapterPages(c *gin.Context) {
 	}
 	prefetchNext(index, position)
 	c.JSON(http.StatusOK, gin.H{
-		"images": content.Images, "provider": content.Provider, "externalUrl": content.ExternalURL, "groups": content.Groups, "language": index.Language, "manga": index.Name, "slug": index.Slug,
+		"images": content.Images, "imageFallbacks": content.ImageFallbacks, "provider": content.Provider, "externalUrl": content.ExternalURL, "groups": content.Groups, "language": index.Language, "manga": index.Name, "slug": index.Slug,
 		"chapter": current, "previous": previous, "next": next,
 	})
 }

@@ -39,6 +39,7 @@ func parseCards(doc *goquery.Document, base *url.URL, cards, titles string) []ca
 			Slug: parts[1], Title: title, Image: imageURL(base, card.Find("img").First()),
 			Chapters: []string{},
 		}
+		item.Image, item.ImageFallback = imageDelivery(item.Image)
 		card.Find(".chapter-item span a").Each(func(_ int, chapter *goquery.Selection) {
 			item.Chapters = append(item.Chapters, cleanText(chapter.Text()))
 		})

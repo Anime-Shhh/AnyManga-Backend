@@ -2,8 +2,15 @@ package scrapers
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 )
+
+var cacheHits, cacheMisses, cacheShared atomic.Uint64
+
+func CacheMetrics() map[string]uint64 {
+	return map[string]uint64{"hits": cacheHits.Load(), "misses": cacheMisses.Load(), "sharedLoads": cacheShared.Load()}
+}
 
 type cachedValue[T any] struct {
 	value   T
@@ -35,13 +42,16 @@ func (c *cache[T]) get(key string, load func() (T, error)) (T, error) {
 	c.mu.Lock()
 	if entry, ok := c.values[key]; ok && time.Now().Before(entry.expires) {
 		c.mu.Unlock()
+		cacheHits.Add(1)
 		return entry.value, nil
 	}
 	if pending, ok := c.pending[key]; ok {
 		c.mu.Unlock()
+		cacheShared.Add(1)
 		<-pending.done
 		return pending.value, pending.err
 	}
+	cacheMisses.Add(1)
 	pending := &pendingLoad[T]{done: make(chan struct{})}
 	c.pending[key] = pending
 	c.mu.Unlock()
@@ -67,3 +77,5 @@ func (c *cache[T]) get(key string, load func() (T, error)) (T, error) {
 	close(pending.done)
 	return pending.value, pending.err
 }
+
+func (c *cache[T]) forget(key string) { c.mu.Lock(); defer c.mu.Unlock(); delete(c.values, key) }

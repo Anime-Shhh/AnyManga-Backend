@@ -1,6 +1,7 @@
 package scrapers
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/tls"
@@ -13,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -39,7 +41,7 @@ func allowedImageURL(u *url.URL) bool {
 func imageProxy(address string) string {
 	u, err := url.Parse(address)
 	if err != nil || !allowedImageURL(u) {
-		return address
+		return ""
 	}
 	return "/api/manga/image?" + url.Values{"url": {address}}.Encode()
 }
@@ -99,26 +101,107 @@ func fetchImage(ctx context.Context, address string) (data []byte, mime string, 
 	}
 	return data, mime, nil
 }
-func GetProviderImage(c *gin.Context) {
-	address := c.Query("url")
-	if len(address) > 2048 {
-		c.Status(http.StatusBadRequest)
-		return
-	}
+
+var proxyRequests, proxyBytes, proxyErrors atomic.Uint64
+
+func ImageMetrics() map[string]uint64 {
+	return map[string]uint64{"proxyRequests": proxyRequests.Load(), "proxyBytes": proxyBytes.Load(), "proxyErrors": proxyErrors.Load()}
+}
+
+// Only MangaRead passed real cross-origin browser embedding tests.
+// MangaPill and WeebCentral CDNs returned blocked opaque responses; retain streaming proxy delivery.
+func imageDelivery(address string) (string, string) {
 	u, err := url.Parse(address)
 	if err != nil || !allowedImageURL(u) {
+		return "", ""
+	}
+	switch u.Hostname() {
+	case "www.mangaread.org", "mangaread.org":
+		return address, imageProxy(address)
+	}
+	return imageProxy(address), ""
+}
+
+func GetProviderImage(c *gin.Context) {
+	address := c.Query("url")
+	u, err := url.Parse(address)
+	if len(address) > 2048 || err != nil || !allowedImageURL(u) {
 		c.Status(http.StatusBadRequest)
 		return
 	}
-	data, mime, err := fetchImage(c.Request.Context(), address)
-	if err != nil {
-		_ = c.Error(err)
-		c.Status(http.StatusBadGateway)
+	select {
+	case imageSlots <- struct{}{}:
+		defer func() { <-imageSlots }()
+	case <-c.Request.Context().Done():
 		return
 	}
+	proxyRequests.Add(1)
+	started := time.Now()
+	written := int64(0)
+	success := false
+	defer func() {
+		proxyBytes.Add(uint64(written))
+		if !success {
+			proxyErrors.Add(1)
+		}
+		reportMangaDexImage(address, success, int(written), time.Since(started))
+	}()
+	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, address, nil)
+	if err != nil {
+		c.Status(400)
+		return
+	}
+	req.Header.Set("User-Agent", providerAgent)
+	if u.Hostname() == "cdn.readdetectiveconan.com" {
+		req.Header.Set("Referer", "https://mangapill.com/")
+	} else if u.Hostname() == "scans-hot.planeptune.us" {
+		req.Header.Set("Referer", "https://weebcentral.com/")
+	}
+	response, err := imageClient.Do(req)
+	if err != nil {
+		_ = c.Error(err)
+		c.Status(502)
+		return
+	}
+	defer response.Body.Close()
+	const maxBytes = int64(12 << 20)
+	if response.StatusCode != 200 || response.ContentLength > maxBytes {
+		c.Status(502)
+		return
+	}
+	reader := bufio.NewReaderSize(response.Body, 64<<10)
+	peek, err := reader.Peek(512)
+	if err != nil && err != io.EOF {
+		c.Status(502)
+		return
+	}
+	mime := http.DetectContentType(peek)
+	if mime != "image/jpeg" && mime != "image/png" && mime != "image/gif" && mime != "image/webp" {
+		c.Status(502)
+		return
+	}
+	var prefix bytes.Buffer
+	if mime != "image/webp" {
+		config, _, err := image.DecodeConfig(io.TeeReader(io.LimitReader(reader, 64<<10), &prefix))
+		if err != nil || int64(config.Width)*int64(config.Height) > 60_000_000 {
+			c.Status(502)
+			return
+		}
+	}
+	c.Header("Content-Type", mime)
 	c.Header("Cache-Control", "public, max-age=3600, stale-while-revalidate=86400")
 	c.Header("X-Content-Type-Options", "nosniff")
-	c.Data(http.StatusOK, mime, data)
+	if response.ContentLength >= 0 {
+		c.Header("Content-Length", fmt.Sprint(response.ContentLength))
+	}
+	body := io.MultiReader(&prefix, reader)
+	written, err = io.Copy(c.Writer, io.LimitReader(body, maxBytes))
+	var extra [1]byte
+	n, extraErr := body.Read(extra[:])
+	success = err == nil && n == 0 && (extraErr == io.EOF || extraErr == nil)
+	if !success {
+		_ = c.Error(errors.New("image stream interrupted or exceeded its limit"))
+	}
 }
 
 var reportSlots = make(chan struct{}, 2)

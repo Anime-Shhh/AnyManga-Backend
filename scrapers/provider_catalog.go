@@ -119,7 +119,7 @@ func mergeSeries(ref, language string, sources map[string]*providerSeries) *mang
 			index.Description = s.Description
 		}
 		if index.Image == "" {
-			index.Image = imageProxy(s.Image)
+			index.Image, index.ImageFallback = imageDelivery(s.Image)
 		}
 		if index.Kind == "" {
 			index.Kind = s.Kind
@@ -212,10 +212,11 @@ func mergeSeries(ref, language string, sources map[string]*providerSeries) *mang
 }
 
 type chapterContent struct {
-	Images      []string
-	Provider    string
-	ExternalURL string
-	Groups      []string
+	ImageFallbacks map[string]string
+	Images         []string
+	Provider       string
+	ExternalURL    string
+	Groups         []string
 }
 
 var contentCache = newCache[chapterContent](512, 3*time.Minute)
@@ -245,10 +246,24 @@ func loadContent(index *mangaIndex, entry chapterLink, skip string) (chapterCont
 				continue
 			}
 			pages = slices.Clone(pages)
+			fallbacks := map[string]string{}
+			valid := true
 			for i, address := range pages {
-				pages[i] = imageProxy(address)
+				primary, fallback := imageDelivery(address)
+				if primary == "" {
+					valid = false
+					break
+				}
+				pages[i] = primary
+				if fallback != "" {
+					fallbacks[primary] = fallback
+				}
 			}
-			return chapterContent{Images: pages, Provider: candidate.Provider, Groups: candidate.Groups}, nil
+			if !valid {
+				failures = append(failures, candidate.Provider)
+				continue
+			}
+			return chapterContent{Images: pages, ImageFallbacks: fallbacks, Provider: candidate.Provider, Groups: candidate.Groups}, nil
 		}
 		if external != nil {
 			return chapterContent{Images: []string{}, Provider: external.Provider, ExternalURL: external.ExternalURL, Groups: external.Groups}, nil
@@ -276,3 +291,14 @@ func prefetchNext(index *mangaIndex, position int) {
 var languageCode = regexp.MustCompile(`^[a-z]{2,3}(?:-[a-z]{2,4})?$`)
 
 func validLanguage(language string) bool { return languageCode.MatchString(language) }
+
+func refreshContent(index *mangaIndex, entry chapterLink, skip string) {
+	contentCache.forget(index.Slug + ":" + index.Language + ":" + entry.ID + ":" + skip)
+	for _, c := range index.candidates[entry.ID] {
+		pageCache.forget(c.Provider + ":" + c.ID)
+		pageCache.forget(c.URL)
+		if c.Provider == "mangadex" {
+			mdJSONCache.forget("https://api.mangadex.org/at-home/server/" + c.ID + "?forcePort443=true")
+		}
+	}
+}

@@ -5,7 +5,8 @@ import "net/url"
 func seriesCards(series []providerSeries) []catalogItem {
 	items := []catalogItem{}
 	for _, s := range series {
-		items = append(items, catalogItem{Slug: seriesRef(s.Provider, s.ID), Title: s.Name, Image: imageProxy(s.Image), Description: s.Description, Chapters: []string{}})
+		primary, fallback := imageDelivery(s.Image)
+		items = append(items, catalogItem{Slug: seriesRef(s.Provider, s.ID), Title: s.Name, Image: primary, ImageFallback: fallback, Description: s.Description, Chapters: []string{}})
 	}
 	return items
 }

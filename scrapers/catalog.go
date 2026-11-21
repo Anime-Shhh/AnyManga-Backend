@@ -41,6 +41,7 @@ type chapterLink struct {
 type mangaIndex struct {
 	Name           string        `json:"name"`
 	Image          string        `json:"image"`
+	ImageFallback  string        `json:"imageFallback,omitempty"`
 	Description    string        `json:"description"`
 	Slug           string        `json:"slug"`
 	Entries        []chapterLink `json:"chapterEntries"`
@@ -60,11 +61,12 @@ type mangaIndex struct {
 }
 
 type catalogItem struct {
-	Slug        string   `json:"slug"`
-	Title       string   `json:"title"`
-	Image       string   `json:"image"`
-	Description string   `json:"description"`
-	Chapters    []string `json:"chapters"`
+	Slug          string   `json:"slug"`
+	Title         string   `json:"title"`
+	Image         string   `json:"image"`
+	ImageFallback string   `json:"imageFallback,omitempty"`
+	Description   string   `json:"description"`
+	Chapters      []string `json:"chapters"`
 }
 
 var (

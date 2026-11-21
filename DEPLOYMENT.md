@@ -1,0 +1,21 @@
+# Windows service deployment
+
+Never restart/shut down/log off/lock Windows, restart WSL, Tailscale, networking, SSH or Codex as part of deployment. Install no Windows features or OS updates. Only the AnyManga application service may be stopped or restarted. Preserve the old Vercel deployment until production checks pass.
+
+Build a Windows amd64 binary with CGO disabled from a pushed commit. Embed `main.buildCommit` using Go `-ldflags`, publish the binary and `deploy/install-windows.ps1` with `SHA256SUMS` and a source commit manifest in a versioned GitHub release. Download the exact release to `C:\ProgramData\AnyManga\releases\<tag>`, verify checksums, and retain old releases for rollback. No compiler, Docker or WSL is required on Windows.
+
+Create a random 32-byte API key in `secrets\api-key.txt`, not in Git/arguments/global environment. Configure NTFS ACLs: Administrators/SYSTEM full control; LocalService read releases, config and key, modify only logs. Then run the verified install script elevated. It registers AnyMangaBackend as an automatic delayed-start LocalService service, with recovery actions that restart only the application service. No computer-reboot recovery action exists in the implementation.
+
+Config JSON fields: address (loopback only), apiKeyFile, deploymentId, logDirectory, metadataPerMinute, imagePerMinute, pdfPerMinute. Log files rotate at 10 MiB with three retained backups. `--config` loads this file. `--service install` registers the service; `--service start` starts only AnyMangaBackend. Local development without a config remains supported; production home deployments require the protected key file.
+
+`GET /health` returns 204 with no-store and X-AnyManga-Backend-ID. Other endpoints require `Authorization: Bearer <key>` when configured. `GET /admin/status` always requires authentication and returns build/start information, request counters, cache counters, and proxy bytes. Never expose the key in logs or browser bundles. Application requests log their generated X-AnyManga-Request-ID; match that response ID against PC logs to prove the actual origin.
+
+Forward only HTTPS Tailscale Funnel to localhost:8080, using persistent `--bg` configuration after human authorization. Enable unattended mode with a preference-only change preserving connection/DNS/routes; never down/up/reset/force-reauth. Set AC sleep timeout to Never without altering battery/display settings. Do not test Windows reboot/logoff recovery.
+
+On Vercel, use the frontend's server-only API forwarding handler with MANGA_API_ORIGIN and MANGA_API_KEY. Browser URLs stay /api/manga/*. Remove the Vercel Go-service rewrite only after the PC's local/authenticated/public checks pass. On origin outage, show a temporary-unavailability response; no silent origin fallback hides which backend is serving requests.
+
+Controlled update: download/checksum a new version first, save current service ImagePath/config, stop only AnyMangaBackend, update its binary path to the new verified executable with the same protected --config argument, start only that service, and check health and authenticated sample requests. If unhealthy, restore the old ImagePath/config and start the old application. Keep every command scoped to the exact service name; never use broad process-name termination.
+
+Production rollback: restore/promote the previously verified Vercel deployment with its original Go service routing. Verify /read and chapter loading before touching the PC deployment. Do not remove old Vercel deployments during migration.
+
+Browser-verified MangaRead images use direct no-referrer embedding and an explicit proxy fallback. Real browser tests blocked MangaPill and WeebCentral CDN images (opaque-response blocking); those sources and MangaDex stay proxied. Do not force direct delivery for hosts that fail embedding tests. Unknown image hosts are rejected. Image proxying streams bounded data after MIME/header validation; PDFs retain their separate 64 MiB/200-page/two-job limits. Refreshing chapterimages with refresh=1 evicts that chapter's page/manifest cache before loading it again. Existing near-end prefetch remains limited to three images.

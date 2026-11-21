@@ -1,0 +1,28 @@
+name: Backend checks and Windows build
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go test -race ./...
+      - run: go vet ./...
+      - name: Build Windows release
+        env:
+          GOOS: windows
+          GOARCH: amd64
+          CGO_ENABLED: '0'
+        run: go build -trimpath -ldflags "-s -w -X main.buildCommit=$GITHUB_SHA" -o anymanga-api-windows-amd64.exe .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: anymanga-windows-${{ github.sha }}
+          path: anymanga-api-windows-amd64.exe
