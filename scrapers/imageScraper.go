@@ -2,6 +2,8 @@ package scrapers
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"image"
 	_ "image/jpeg"
@@ -10,9 +12,9 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/jung-kurt/gofpdf"
 )
 
 type ChaptersRequest struct {
@@ -47,6 +49,13 @@ func CleanURL(raw string) string {
 var pdfSlots = make(chan struct{}, 2)
 
 func GetAllChapters(c *gin.Context) {
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 290*time.Second)
+	defer cancel()
+	c.Request = c.Request.WithContext(ctx)
+	if err := http.NewResponseController(c.Writer).SetWriteDeadline(time.Now().Add(295 * time.Second)); err != nil && !errors.Is(err, http.ErrNotSupported) {
+		c.JSON(500, gin.H{"error": "Could not start the download."})
+		return
+	}
 	select {
 	case pdfSlots <- struct{}{}:
 		defer func() { <-pdfSlots }()
@@ -96,74 +105,65 @@ func GetAllChapters(c *gin.Context) {
 		results = append(results, pages)
 	}
 
+	if totalPages == 0 {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "No downloadable chapter pages."})
+		return
+	}
+	c.Header("Content-Type", "application/pdf")
+	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.pdf"`, index.Slug))
+	c.Header("Cache-Control", "no-store, no-transform")
+	c.Header("X-Accel-Buffering", "no")
+	c.Header("X-AnyManga-Pages", fmt.Sprint(totalPages))
+	pdf := newStreamingPDF(c.Writer)
+	c.Writer.Flush()
 	budget := 64 << 20
-	pdf := gofpdf.New("P", "mm", "A4", "")
 	for _, pages := range results {
-		for _, imgURL := range pages {
+		for _, address := range pages {
 			if c.Request.Context().Err() != nil {
 				return
 			}
-			err := addPDFPage(c.Request, pdf, imgURL, &budget)
+			data, err := downloadPDFImage(c.Request, address, &budget)
+			if err == nil {
+				err = pdf.addPage(data)
+			}
 			if err != nil {
-				reportError(c, err, "Could not download a chapter image.")
+				// Headers may already be on the wire. Never append JSON to a PDF or
+				// finalize a partial document; the client rejects missing EOF.
+				_ = c.Error(err)
 				return
 			}
-		}
-		if pdf.PageNo() == 0 {
-			c.JSON(http.StatusBadGateway, gin.H{"error": "No downloadable chapter pages."})
-			return
+			c.Writer.Flush()
 		}
 	}
-
-	// Output PDF to bytes
-	var buf bytes.Buffer
-	err := pdf.Output(&buf)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create PDF"})
+	if err := pdf.finish(); err != nil {
+		_ = c.Error(err)
 		return
 	}
-
-	// Send PDF to frontend
-	c.Header("Content-Type", "application/pdf")
-	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s.pdf", index.Slug))
-	c.Data(http.StatusOK, "application/pdf", buf.Bytes())
+	c.Writer.Flush()
 }
 
-func addPDFPage(request *http.Request, pdf *gofpdf.Fpdf, address string, budget *int) error {
+func downloadPDFImage(request *http.Request, address string, budget *int) ([]byte, error) {
 	if strings.HasPrefix(address, "/api/manga/image?") {
 		link, err := url.Parse(address)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		address = link.Query().Get("url")
 	}
 	data, _, err := fetchImage(request.Context(), address)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if len(data) > *budget {
-		return fmt.Errorf("download exceeds the 64 MiB image budget; select fewer chapters")
+		return nil, fmt.Errorf("download exceeds the 64 MiB image budget; select fewer chapters")
 	}
 	*budget -= len(data)
 	config, format, err := image.DecodeConfig(bytes.NewReader(data))
-	if err != nil || config.Width > 10000 || config.Height > 20000 ||
-		int64(config.Width)*int64(config.Height) > 40_000_000 {
-		return fmt.Errorf("unsupported download image")
+	if err != nil || config.Width <= 0 || config.Height <= 0 || config.Width > 10000 || config.Height > 20000 || int64(config.Width)*int64(config.Height) > 40_000_000 {
+		return nil, fmt.Errorf("unsupported download image")
 	}
-	var imageType string
-	switch format {
-	case "jpeg":
-		imageType = "JPG"
-	case "png":
-		imageType = "PNG"
-	default:
-		return fmt.Errorf("unsupported PDF image type %q", format)
+	if format != "jpeg" && format != "png" {
+		return nil, fmt.Errorf("unsupported PDF image type %q", format)
 	}
-	width, height := float64(config.Width), float64(config.Height)
-	scale := min(210/width, 297/height)
-	pdf.AddPage()
-	options := gofpdf.ImageOptions{ImageType: imageType, ReadDpi: true}
-	pdf.RegisterImageOptionsReader(address, options, bytes.NewReader(data))
-	pdf.ImageOptions(address, (210-width*scale)/2, 0, width*scale, height*scale, false, options, 0, "")
-	return pdf.Error()
+	return data, nil
 }

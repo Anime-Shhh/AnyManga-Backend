@@ -34,3 +34,11 @@ The frontend fetches next metadata while reading and warms the next chapter's fi
 Offline tests: `go test -race ./...`. Optional live provider/image smoke test: `LIVE_PROVIDERS=1 go test ./scrapers -run TestLiveProviderPages -count=1 -v`.
 
 See the [frontend self-hosting guide](https://github.com/Anime-Shhh/AnyManga-frontend/blob/main/SELF_HOSTING.md) for connecting a PC through Cloudflare Tunnel. Keep the Go service on loopback; do not forward your router's API port.
+
+## Streaming PDF downloads
+
+`POST /chapters` now emits a PDF header and each JPEG/PNG page as it is processed, flushing before fetching the next image. It retains the two-job, ten-chapter, 200-page and 64 MiB source-image limits, adds a 128 MiB PDF output limit, and bounds the operation to 290 seconds. Metadata/chapter-list validation precedes streaming; upstream images are still downloaded one at a time with the existing restricted image client. PNG images are losslessly compressed as RGB on a white background; JPEG bytes remain embedded directly. Only the current image and small PDF cross-reference/page tables are retained, rather than an accumulated document.
+
+An interrupted stream deliberately has no final PDF trailer. Browser consumers must check the PDF signature and final `%%EOF` before saving; HTTP 200 alone cannot prove completion once headers are sent. Cancellation propagates to image requests. Frontend progress shows received bytes, current transfer speed, elapsed time, and Cancel; the final size is unknown until generation finishes, so no percentage or ETA is fabricated.
+
+Offline streaming regressions block the final upstream image and assert that real HTTP clients already receive first-page bytes, validate final object offsets, reject incomplete/error paths, and check source budgets. `PDF_TEST_OUTPUT=/path/sample.pdf go test ./scrapers -run TestStreamingPDFStructureAndPartialWrites` writes a JPEG/PNG fixture for independent PDF-reader validation.
