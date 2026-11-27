@@ -63,7 +63,9 @@ func GetChapterPages(c *gin.Context) {
 	if position+1 < len(index.Entries) {
 		next = &index.Entries[position+1]
 	}
-	prefetchNext(index, position)
+	if c.Query("prefetch") != "0" {
+		prefetchNext(index, position)
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"images": content.Images, "imageFallbacks": content.ImageFallbacks, "provider": content.Provider, "externalUrl": content.ExternalURL, "groups": content.Groups, "language": index.Language, "manga": index.Name, "slug": index.Slug,
 		"chapter": current, "previous": previous, "next": next,

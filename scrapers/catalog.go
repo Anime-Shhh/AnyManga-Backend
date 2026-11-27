@@ -33,9 +33,10 @@ var (
 )
 
 type chapterLink struct {
-	ID    string `json:"id"`
-	Title string `json:"title"`
-	URL   string `json:"-"`
+	Number string `json:"number,omitempty"`
+	ID     string `json:"id"`
+	Title  string `json:"title"`
+	URL    string `json:"-"`
 }
 
 type mangaIndex struct {
@@ -170,7 +171,11 @@ func parseIndex(doc *goquery.Document, base *url.URL, slug string) *mangaIndex {
 			return
 		}
 		seen[parts[2]] = true
-		index.Entries = append(index.Entries, chapterLink{ID: parts[2], Title: title, URL: link.String()})
+		entry := chapterLink{ID: parts[2], Title: title, URL: link.String()}
+		if match := chapterNumber.FindStringSubmatch(title); match != nil {
+			entry.Number = canonicalNumber(match[1])
+		}
+		index.Entries = append(index.Entries, entry)
 	})
 	slices.Reverse(index.Entries)
 	for position, entry := range index.Entries {

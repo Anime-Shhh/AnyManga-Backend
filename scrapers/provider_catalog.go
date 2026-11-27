@@ -193,7 +193,7 @@ func mergeSeries(ref, language string, sources map[string]*providerSeries) *mang
 			}
 		}
 		position := len(index.Entries)
-		entry := chapterLink{ID: id, Title: selected.Title}
+		entry := chapterLink{ID: id, Title: selected.Title, Number: selected.Number}
 		index.Entries = append(index.Entries, entry)
 		index.Chapters = append(index.Chapters, entry.Title)
 		index.positions[id] = position
