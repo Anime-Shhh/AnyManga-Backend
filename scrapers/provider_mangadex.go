@@ -10,6 +10,8 @@ import (
 type mdEntity struct {
 	ID         string `json:"id"`
 	Attributes struct {
+		CreatedAt                    string              `json:"createdAt"`
+		ReadableAt                   string              `json:"readableAt"`
 		Title                        json.RawMessage     `json:"title"`
 		AltTitles                    []map[string]string `json:"altTitles"`
 		Description                  map[string]string   `json:"description"`

@@ -92,6 +92,7 @@ func registerRoutes(routes gin.IRouter) {
 	routes.GET("/image", scrapers.GetProviderImage)
 	routes.GET("/info", scrapers.GetMangaInfo)
 	routes.POST("/chapters", scrapers.GetAllChapters)
+	routes.GET("/discovery", scrapers.GetDiscovery)
 	routes.GET("/featured", scrapers.GetFeaturedManga)
 	routes.GET("/popular", scrapers.GetPopular)
 	routes.GET("/category", scrapers.GetBrowseCategory)
